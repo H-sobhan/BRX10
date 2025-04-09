@@ -5,114 +5,334 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BRX10 Index</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
   <style>
+    :root {
+      --primary-color: #1a73e8;
+      --secondary-color: #34a853;
+      --warning-color: #fbbc05;
+      --error-color: #ea4335;
+      --background-color: #f9f9f9;
+      --card-color: #ffffff;
+      --text-color: #333333;
+      --border-color: #e0e0e0;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       padding: 20px;
-      background: #f9f9f9;
+      background: var(--background-color);
+      color: var(--text-color);
+      line-height: 1.6;
     }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
     h1 {
-      color: #333;
+      color: var(--primary-color);
+      font-size: 2rem;
+      margin-bottom: 10px;
     }
+
+    .card {
+      background: var(--card-color);
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .index-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .index-details {
+      flex: 1;
+      min-width: 300px;
+    }
+
+    #index-value {
+      font-size: 2.5rem;
+      font-weight: bold;
+      margin: 10px 0;
+      color: var(--primary-color);
+    }
+
+    #index-change {
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .positive {
+      color: var(--secondary-color);
+    }
+
+    .negative {
+      color: var(--error-color);
+    }
+
+    .chart-container {
+      flex: 2;
+      min-width: 500px;
+      height: 300px;
+      position: relative;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 20px;
+      font-size: 0.9rem;
     }
+
     th, td {
-      padding: 10px;
-      border: 1px solid #ccc;
+      padding: 12px 15px;
+      border-bottom: 1px solid var(--border-color);
       text-align: left;
     }
-    #index-value {
-      font-size: 24px;
+
+    th {
+      background-color: #f2f2f2;
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background-color: #f5f5f5;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #0d62d0;
+    }
+
+    .time-selector {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 10px;
+    }
+
+    .time-selector button {
+      background-color: #f2f2f2;
+      color: var(--text-color);
+      font-size: 0.8rem;
+      padding: 5px 10px;
+    }
+
+    .time-selector button.active {
+      background-color: var(--primary-color);
+      color: white;
+    }
+
+    .loading {
+      position: relative;
+    }
+
+    .loading::after {
+      content: "Loading...";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 1.2rem;
+      color: var(--primary-color);
+    }
+
+    .last-updated {
+      font-size: 0.8rem;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .error-message {
+      background-color: #ffebee;
+      color: var(--error-color);
+      padding: 10px;
+      border-radius: 4px;
       margin: 10px 0;
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      .chart-container {
+        min-width: 100%;
+      }
+      
+      .index-details {
+        min-width: 100%;
+      }
+      
+      th, td {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+      }
+      
+      .buttons {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>BRX10 Real-Time Export Index</h1>
-  <div id="index-value">Loading...</div>
-  <canvas id="chart" width="400" height="150"></canvas>
+  <div class="container">
+    <header>
+      <h1>BRX10 Real-Time Export Index</h1>
+      <div class="buttons">
+        <button id="refresh-button">Refresh Data</button>
+        <button id="export-csv">Export to CSV</button>
+      </div>
+    </header>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Company</th>
-        <th>Ticker</th>
-        <th>Price (R$)</th>
-      </tr>
-    </thead>
-    <tbody id="stock-table"></tbody>
-  </table>
+    <div class="error-message" id="error-display">
+      Unable to fetch data. Please try again later.
+    </div>
+    
+    <div class="card">
+      <div class="index-container">
+        <div class="index-details">
+          <h2>Current Value</h2>
+          <div id="index-value">Loading...</div>
+          <div id="index-change">--</div>
+          <div class="last-updated">Last updated: <span id="last-updated-time">--</span></div>
+        </div>
+        <div class="chart-container">
+          <div class="time-selector">
+            <button class="time-btn active" data-time="1h">1H</button>
+            <button class="time-btn" data-time="3h">3H</button>
+            <button class="time-btn" data-time="1d">1D</button>
+          </div>
+          <canvas id="chart"></canvas>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>Component Stocks</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Ticker</th>
+            <th>Price (R$)</th>
+            <th>Change</th>
+            <th>Weight</th>
+          </tr>
+        </thead>
+        <tbody id="stock-table"></tbody>
+      </table>
+    </div>
+  </div>
 
   <script>
+    // Configuration
     const tickers = [
-      { name: 'Vale', symbol: 'VALE3.SA' },
-      { name: 'Petrobras', symbol: 'PETR4.SA' },
-      { name: 'JBS', symbol: 'JBSS3.SA' },
-      { name: 'BRF', symbol: 'BRFS3.SA' },
-      { name: 'Suzano', symbol: 'SUZB3.SA' },
-      { name: 'Embraer', symbol: 'EMBR3.SA' },
-      { name: 'Ambev', symbol: 'ABEV3.SA' },
-      { name: 'Gerdau', symbol: 'GGBR4.SA' },
-      { name: 'Klabin', symbol: 'KLBN11.SA' },
-      { name: 'Marfrig', symbol: 'MRFG3.SA' },
+      { name: 'Vale', symbol: 'VALE3.SA', weight: 0.15 },
+      { name: 'Petrobras', symbol: 'PETR4.SA', weight: 0.15 },
+      { name: 'JBS', symbol: 'JBSS3.SA', weight: 0.10 },
+      { name: 'BRF', symbol: 'BRFS3.SA', weight: 0.10 },
+      { name: 'Suzano', symbol: 'SUZB3.SA', weight: 0.10 },
+      { name: 'Embraer', symbol: 'EMBR3.SA', weight: 0.10 },
+      { name: 'Ambev', symbol: 'ABEV3.SA', weight: 0.10 },
+      { name: 'Gerdau', symbol: 'GGBR4.SA', weight: 0.10 },
+      { name: 'Klabin', symbol: 'KLBN11.SA', weight: 0.05 },
+      { name: 'Marfrig', symbol: 'MRFG3.SA', weight: 0.05 },
     ];
 
+    // Demo mode - replace with actual API call in production
+    const DEMO_MODE = true; // Set to false when you have API proxy ready
+    
+    // State variables
     let chart;
+    let historicalData = [];
+    let lastIndexValue = 0;
+    let currentTimeFrame = '1h';
+    
+    // Chart configuration
     const chartData = {
       labels: [],
       datasets: [{
         label: 'BRX10 Index',
-        borderColor: 'blue',
-        fill: false,
+        borderColor: '#1a73e8',
+        backgroundColor: 'rgba(26, 115, 232, 0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 1,
+        pointHoverRadius: 5,
         data: [],
       }]
     };
 
-    async function fetchPrices() {
-      const symbols = tickers.map(t => t.symbol).join(',');
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+    // Initialize the application
+    document.addEventListener('DOMContentLoaded', function() {
+      setupChart();
+      setupEventListeners();
+      fetchData();
+      
+      // Set interval for auto-refresh (every minute)
+      setInterval(fetchData, 60000);
+    });
 
-      try {
-        const response = await fetch(url);
-        const data = await response.json();
-
-        const prices = data.quoteResponse.result.reduce((acc, item) => {
-          acc[item.symbol] = item.regularMarketPrice;
-          return acc;
-        }, {});
-
-        const tbody = document.getElementById('stock-table');
-        tbody.innerHTML = '';
-        let total = 0;
-
-        tickers.forEach(ticker => {
-          const price = prices[ticker.symbol];
-          total += price;
-          const row = `<tr><td>${ticker.name}</td><td>${ticker.symbol}</td><td>${price.toFixed(2)}</td></tr>`;
-          tbody.innerHTML += row;
+    // Set up event listeners
+    function setupEventListeners() {
+      // Refresh button
+      document.getElementById('refresh-button').addEventListener('click', fetchData);
+      
+      // Export to CSV
+      document.getElementById('export-csv').addEventListener('click', exportToCSV);
+      
+      // Time frame buttons
+      document.querySelectorAll('.time-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+          this.classList.add('active');
+          currentTimeFrame = this.dataset.time;
+          updateChartTimeFrame();
         });
-
-        const indexValue = (total / tickers.length).toFixed(2);
-        document.getElementById('index-value').innerText = `Current BRX10 Index: ${indexValue}`;
-
-        const now = new Date().toLocaleTimeString();
-        chartData.labels.push(now);
-        chartData.datasets[0].data.push(indexValue);
-
-        if (chartData.labels.length > 20) {
-          chartData.labels.shift();
-          chartData.datasets[0].data.shift();
-        }
-
-        chart.update();
-      } catch (err) {
-        console.error('Failed to fetch data', err);
-      }
+      });
     }
 
+    // Set up the chart
     function setupChart() {
       const ctx = document.getElementById('chart').getContext('2d');
       chart = new Chart(ctx, {
@@ -120,16 +340,308 @@
         data: chartData,
         options: {
           responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              callbacks: {
+                label: function(context) {
+                  return `BRX10: R$ ${context.raw.toFixed(2)}`;
+                }
+              }
+            },
+            legend: {
+              display: false
+            }
+          },
           scales: {
-            y: { beginAtZero: false }
+            x: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                maxTicksLimit: 8,
+                maxRotation: 0
+              }
+            },
+            y: {
+              beginAtZero: false,
+              ticks: {
+                callback: function(value) {
+                  return 'R$ ' + value.toFixed(2);
+                }
+              }
+            }
+          },
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
           }
         }
       });
     }
 
-    setupChart();
-    fetchPrices();
-    setInterval(fetchPrices, 60000); // update every minute
+    // Fetch data (API or demo)
+    async function fetchData() {
+      try {
+        // Add loading indicators
+        document.querySelector('.chart-container').classList.add('loading');
+        document.querySelector('.index-details').classList.add('loading');
+        document.getElementById('stock-table').innerHTML = '';
+        
+        // Hide error message if shown
+        document.getElementById('error-display').style.display = 'none';
+        
+        let data;
+        
+        if (DEMO_MODE) {
+          // Use demo data in development to avoid CORS issues
+          data = generateDemoData();
+          await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
+        } else {
+          // In production, use a proxy or backend service to avoid CORS
+          const symbols = tickers.map(t => t.symbol).join(',');
+          // Example with proxy - replace with your actual proxy endpoint
+          const url = `/api/stock-proxy?symbols=${symbols}`;
+          // Alternative: const url = `https://your-backend-service.com/api/yahoo-finance?symbols=${symbols}`;
+          
+          const response = await fetch(url);
+          if (!response.ok) throw new Error('Network response was not ok');
+          data = await response.json();
+        }
+        
+        processData(data);
+        
+      } catch (err) {
+        console.error('Failed to fetch data', err);
+        document.getElementById('error-display').style.display = 'block';
+      } finally {
+        // Remove loading indicators
+        document.querySelector('.chart-container').classList.remove('loading');
+        document.querySelector('.index-details').classList.remove('loading');
+      }
+    }
+
+    // Generate demo data for development
+    function generateDemoData() {
+      const now = new Date();
+      const baseValues = {
+        'VALE3.SA': 65.42 + (Math.random() * 2 - 1),
+        'PETR4.SA': 38.75 + (Math.random() * 1.5 - 0.75),
+        'JBSS3.SA': 27.13 + (Math.random() * 1 - 0.5),
+        'BRFS3.SA': 8.94 + (Math.random() * 0.4 - 0.2),
+        'SUZB3.SA': 52.30 + (Math.random() * 1.2 - 0.6),
+        'EMBR3.SA': 23.17 + (Math.random() * 0.8 - 0.4),
+        'ABEV3.SA': 14.83 + (Math.random() * 0.5 - 0.25),
+        'GGBR4.SA': 21.56 + (Math.random() * 0.7 - 0.35),
+        'KLBN11.SA': 19.25 + (Math.random() * 0.6 - 0.3),
+        'MRFG3.SA': 12.47 + (Math.random() * 0.5 - 0.25)
+      };
+      
+      // Generate previous day close prices (slightly different)
+      const previousClose = {};
+      Object.keys(baseValues).forEach(symbol => {
+        previousClose[symbol] = baseValues[symbol] * (1 + (Math.random() * 0.04 - 0.02));
+      });
+      
+      // Mock API response format
+      return {
+        quoteResponse: {
+          result: tickers.map(ticker => ({
+            symbol: ticker.symbol,
+            regularMarketPrice: baseValues[ticker.symbol],
+            regularMarketPreviousClose: previousClose[ticker.symbol],
+            regularMarketChange: baseValues[ticker.symbol] - previousClose[ticker.symbol],
+            regularMarketChangePercent: ((baseValues[ticker.symbol] / previousClose[ticker.symbol] - 1) * 100),
+            regularMarketTime: Math.floor(now.getTime() / 1000)
+          }))
+        }
+      };
+    }
+
+    // Process the data received
+    function processData(data) {
+      const stockData = data.quoteResponse.result;
+      const prices = stockData.reduce((acc, item) => {
+        acc[item.symbol] = {
+          price: item.regularMarketPrice,
+          change: item.regularMarketChange,
+          changePercent: item.regularMarketChangePercent
+        };
+        return acc;
+      }, {});
+      
+      // Update the stock table
+      const tbody = document.getElementById('stock-table');
+      tbody.innerHTML = '';
+      
+      let indexTotal = 0;
+      let previousIndexTotal = 0;
+      
+      tickers.forEach(ticker => {
+        const stockInfo = prices[ticker.symbol];
+        if (!stockInfo) return;
+        
+        const price = stockInfo.price;
+        const change = stockInfo.change;
+        const changePercent = stockInfo.changePercent;
+        
+        // Calculate weighted value for index
+        indexTotal += price * ticker.weight;
+        previousIndexTotal += (price - change) * ticker.weight;
+        
+        // Create table row
+        const row = document.createElement('tr');
+        
+        // Company name
+        const nameCell = document.createElement('td');
+        nameCell.textContent = ticker.name;
+        row.appendChild(nameCell);
+        
+        // Ticker
+        const tickerCell = document.createElement('td');
+        tickerCell.textContent = ticker.symbol;
+        row.appendChild(tickerCell);
+        
+        // Price
+        const priceCell = document.createElement('td');
+        priceCell.textContent = `R$ ${price.toFixed(2)}`;
+        row.appendChild(priceCell);
+        
+        // Change
+        const changeCell = document.createElement('td');
+        const changeSign = change >= 0 ? '+' : '';
+        changeCell.textContent = `${changeSign}${change.toFixed(2)} (${changeSign}${changePercent.toFixed(2)}%)`;
+        changeCell.className = change >= 0 ? 'positive' : 'negative';
+        row.appendChild(changeCell);
+        
+        // Weight
+        const weightCell = document.createElement('td');
+        weightCell.textContent = `${(ticker.weight * 100).toFixed(0)}%`;
+        row.appendChild(weightCell);
+        
+        tbody.appendChild(row);
+      });
+      
+      // Update the index value
+      const indexValue = indexTotal;
+      const indexChange = indexTotal - previousIndexTotal;
+      const indexChangePercent = (indexChange / previousIndexTotal) * 100;
+      
+      document.getElementById('index-value').innerText = `R$ ${indexValue.toFixed(2)}`;
+      
+      const indexChangeElement = document.getElementById('index-change');
+      const changeSign = indexChange >= 0 ? '+' : '';
+      indexChangeElement.textContent = `${changeSign}${indexChange.toFixed(2)} (${changeSign}${indexChangePercent.toFixed(2)}%)`;
+      indexChangeElement.className = indexChange >= 0 ? 'positive' : 'negative';
+      
+      // Update last updated time
+      const now = new Date();
+      document.getElementById('last-updated-time').textContent = now.toLocaleTimeString();
+      
+      // Save historical data
+      historicalData.push({
+        time: now,
+        value: indexValue
+      });
+      
+      // Limit historical data to the last 24 hours (assuming 1-minute intervals = 1440 points)
+      if (historicalData.length > 1440) {
+        historicalData.shift();
+      }
+      
+      // Update the chart with new data
+      updateChartTimeFrame();
+      
+      // Store last index value for next comparison
+      lastIndexValue = indexValue;
+    }
+
+    // Update chart based on selected time frame
+    function updateChartTimeFrame() {
+      const timeFrames = {
+        '1h': 60,    // 60 minutes
+        '3h': 180,   // 3 hours
+        '1d': 1440   // 24 hours
+      };
+      
+      const dataPoints = Math.min(timeFrames[currentTimeFrame], historicalData.length);
+      const relevantData = historicalData.slice(-dataPoints);
+      
+      // Clear existing chart data
+      chartData.labels = [];
+      chartData.datasets[0].data = [];
+      
+      // Add new data points
+      relevantData.forEach(point => {
+        chartData.labels.push(formatTimeLabel(point.time, currentTimeFrame));
+        chartData.datasets[0].data.push(point.value);
+      });
+      
+      // Update chart
+      chart.update();
+    }
+
+    // Format time labels based on selected time frame
+    function formatTimeLabel(time, timeFrame) {
+      if (timeFrame === '1h') {
+        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      } else if (timeFrame === '3h') {
+        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      } else {
+        return time.toLocaleString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+      }
+    }
+
+    // Export table data to CSV
+    function exportToCSV() {
+      let csv = 'Company,Ticker,Price (R$),Change,Weight\n';
+      
+      tickers.forEach(ticker => {
+        const row = document.querySelector(`#stock-table tr:has(td:nth-child(2):contains('${ticker.symbol}'))`);
+        if (row) {
+          const company = row.cells[0].textContent;
+          const symbol = row.cells[1].textContent;
+          const price = row.cells[2].textContent.replace('R$ ', '');
+          const change = row.cells[3].textContent;
+          const weight = row.cells[4].textContent;
+          
+          csv += `"${company}","${symbol}","${price}","${change}","${weight}"\n`;
+        }
+      });
+      
+      // Add index value
+      const indexValue = document.getElementById('index-value').textContent;
+      const indexChange = document.getElementById('index-change').textContent;
+      csv += `\n"BRX10 Index","","${indexValue}","${indexChange}","100%"\n`;
+      csv += `"Last Updated","${document.getElementById('last-updated-time').textContent}","","",""\n`;
+      
+      // Create download link
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `BRX10_Index_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Initialize with one data point to avoid empty chart
+    const initialTime = new Date();
+    historicalData.push({
+      time: initialTime,
+      value: 30.0  // Initial dummy value
+    });
+    chartData.labels.push(formatTimeLabel(initialTime, '1h'));
+    chartData.datasets[0].data.push(30.0);
   </script>
 </body>
 </html>

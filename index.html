@@ -265,7 +265,7 @@
           <div id="index-change">--</div>
           <div class="last-updated">
             <span class="status-indicator" id="status-dot"></span>
-            <span id="connection-status">Connecting...</span> | 
+            <span id="connection-status">Simulating...</span> | 
             Last updated: <span id="last-updated-time">--</span>
           </div>
           <div class="config-panel">
@@ -308,7 +308,7 @@
   </div>
 
   <script>
-    // Configuration
+    // Ticker configuration
     const tickers = [
       { name: 'Vale', symbol: 'VALE3.SA', weight: 0.15 },
       { name: 'Petrobras', symbol: 'PETR4.SA', weight: 0.15 },
@@ -319,26 +319,31 @@
       { name: 'Ambev', symbol: 'ABEV3.SA', weight: 0.10 },
       { name: 'Gerdau', symbol: 'GGBR4.SA', weight: 0.10 },
       { name: 'Klabin', symbol: 'KLBN11.SA', weight: 0.05 },
-      { name: 'Marfrig', symbol: 'MRFG3.SA', weight: 0.05 },
+      { name: 'Marfrig', symbol: 'MRFG3.SA', weight: 0.05 }
     ];
 
-    // Proxy URL - REPLACE THIS WITH YOUR ACTUAL PROXY URL 
-    const PROXY_URL = 'https://your-proxy-server.com/api/yahoo-finance';
-    
-    // State variables
-    let chart;
-    let historicalData = [];
-    let lastIndexValue = 0;
-    let currentTimeFrame = '5m';
-    let updateInterval = 5000; // Default to 5 seconds
-    let dataUpdateInterval = 30000; // Poll every 30 seconds as a fallback
-    let lastFetchTime = 0;
-    let lastData = null;
+    // Simulated initial prices for each ticker
+    const simulatedPrices = {
+      "VALE3.SA": 80.00,
+      "PETR4.SA": 25.00,
+      "JBSS3.SA": 45.00,
+      "BRFS3.SA": 16.00,
+      "SUZB3.SA": 45.00,
+      "EMBR3.SA": 20.00,
+      "ABEV3.SA": 15.00,
+      "GGBR4.SA": 30.00,
+      "KLBN11.SA": 85.00,
+      "MRFG3.SA": 12.00
+    };
+
+    // Global state variables
     let currentData = null;
+    let lastFetchTime = Date.now();
+    let historicalData = [];
     let updateTimer = null;
-    let fetchTimer = null;
-    let connectionStatus = 'connecting'; // 'online', 'delayed', 'offline'
-    
+    let currentTimeFrame = '5m';
+    let updateInterval = 5000; // default update interval
+
     // Chart configuration
     const chartData = {
       labels: [],
@@ -355,212 +360,46 @@
       }]
     };
 
-    document.addEventListener('DOMContentLoaded', function() {
-      setupChart();
-      setupEventListeners();
-      
-      // Attempt to connect via WebSocket for realtime data
-      setupRealtimeConnection();
-
-      // If realtime data isn't provided quickly, fall back to polling after 5 seconds.
-      setTimeout(() => {
-        if (!currentData) {
-          console.log("Falling back to polling mechanism.");
-          fetchRealData().then(() => {
-            updateUI();
-            startAutomaticUpdates();
-          });
-        }
-      }, 5000);
-      
-      // Initially load with dummy data if needed
-      historicalData.push({
-        time: new Date(),
-        value: 30.0
-      });
-    });
-
-    // Set up event listeners
-    function setupEventListeners() {
-      document.getElementById('refresh-button').addEventListener('click', () => {
-        fetchRealData().then(updateUI);
-      });
-      
-      document.getElementById('export-csv').addEventListener('click', exportToCSV);
-      
-      document.querySelectorAll('.time-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-          document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
-          this.classList.add('active');
-          currentTimeFrame = this.dataset.time;
-          updateChartDisplay();
-        });
-      });
-      
-      document.getElementById('update-interval').addEventListener('change', function() {
-        updateInterval = parseInt(this.value);
-        startAutomaticUpdates(); // Restart timers with new interval
-      });
-    }
-
-    // Set up the chart
-    function setupChart() {
-      const ctx = document.getElementById('chart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: chartData,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            tooltip: {
-              mode: 'index',
-              intersect: false,
-              callbacks: {
-                label: function(context) {
-                  return `BRX10: R$ ${context.raw.toFixed(2)}`;
-                }
-              }
-            },
-            legend: {
-              display: false
-            }
-          },
-          scales: {
-            x: {
-              grid: {
-                display: false
-              },
-              ticks: {
-                maxTicksLimit: 8,
-                maxRotation: 0
-              }
-            },
-            y: {
-              beginAtZero: false,
-              ticks: {
-                callback: function(value) {
-                  return 'R$ ' + value.toFixed(2);
-                }
-              }
-            }
-          },
-          interaction: {
-            mode: 'nearest',
-            axis: 'x',
-            intersect: false
-          }
-        }
-      });
-    }
-
-    // Setup realtime connection via WebSocket
-    function setupRealtimeConnection() {
-      const realtimeSocket = new WebSocket('wss://your-realtime-data-server.com/path');
-
-      realtimeSocket.onopen = function() {
-        console.log("WebSocket connected.");
-        // Update status to online upon connection
-        connectionStatus = 'online';
-        updateStatusIndicator();
-      };
-
-      realtimeSocket.onmessage = function(event) {
-        try {
-          const realtimeData = JSON.parse(event.data);
-          // Expect realtimeData to have a structure similar to the output of processApiResponse
-          currentData = realtimeData;
-          lastFetchTime = Date.now();
-          updateUI();
-        } catch (e) {
-          console.error("Error parsing realtime data", e);
-        }
-      };
-
-      realtimeSocket.onerror = function(error) {
-        console.error("WebSocket error", error);
-        // Fallback to polling if an error occurs
-        startAutomaticUpdates();
-      };
-
-      realtimeSocket.onclose = function() {
-        console.log("WebSocket connection closed. Falling back to polling.");
-        startAutomaticUpdates();
-      };
-    }
-
-    // Start automatic updates with current interval (used as a fallback for when real-time isn't available)
-    function startAutomaticUpdates() {
-      if (updateTimer) clearInterval(updateTimer);
-      if (fetchTimer) clearInterval(fetchTimer);
-      fetchTimer = setInterval(fetchRealData, dataUpdateInterval);
-      updateTimer = setInterval(updateUI, updateInterval);
-    }
-
-    // Fetch real data from Yahoo Finance via proxy (fallback method)
-    async function fetchRealData() {
-      try {
-        document.querySelector('.chart-container').classList.add('loading');
-        document.querySelector('.index-details').classList.add('loading');
-        document.getElementById('error-display').style.display = 'none';
-        lastData = currentData;
-        const symbols = tickers.map(t => t.symbol).join(',');
-        const url = `${PROXY_URL}?symbols=${symbols}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
-        connectionStatus = 'online';
-        updateStatusIndicator();
-        currentData = processApiResponse(data);
-        lastFetchTime = Date.now();
-        return currentData;
-      } catch (err) {
-        console.error('Failed to fetch data', err);
-        document.getElementById('error-display').style.display = 'block';
-        connectionStatus = 'offline';
-        updateStatusIndicator();
-        return null;
-      } finally {
-        document.querySelector('.chart-container').classList.remove('loading');
-        document.querySelector('.index-details').classList.remove('loading');
-      }
-    }
-
-    // Process API response to a common format
-    function processApiResponse(data) {
-      if (!data || !data.quoteResponse || !data.quoteResponse.result) {
-        return null;
-      }
-      
-      const stocks = data.quoteResponse.result;
-      const processed = {
-        timestamp: Date.now(),
-        stocks: {}
-      };
-      
-      stocks.forEach(stock => {
-        processed.stocks[stock.symbol] = {
-          price: stock.regularMarketPrice,
-          previousClose: stock.regularMarketPreviousClose,
-          change: stock.regularMarketChange,
-          changePercent: stock.regularMarketChangePercent
+    // Simulate realtime data by updating prices with a random fluctuation
+    function simulateRealtimeData() {
+      // Initialize simulated data if not already set
+      if (!currentData) {
+        currentData = {
+          timestamp: Date.now(),
+          stocks: {}
         };
-      });
-      
-      return processed;
+        tickers.forEach(ticker => {
+          currentData.stocks[ticker.symbol] = {
+            price: simulatedPrices[ticker.symbol],
+            previousClose: simulatedPrices[ticker.symbol],
+            change: 0,
+            changePercent: 0
+          };
+        });
+      } else {
+        // Update prices with a random fluctuation between -1% to +1%
+        tickers.forEach(ticker => {
+          const stock = currentData.stocks[ticker.symbol];
+          const oldPrice = stock.price;
+          const randFactor = Math.random() * 0.02 - 0.01; // between -0.01 and +0.01
+          const newPrice = oldPrice * (1 + randFactor);
+          stock.change = newPrice - oldPrice;
+          stock.changePercent = (stock.change / oldPrice) * 100;
+          stock.previousClose = oldPrice;
+          stock.price = newPrice;
+        });
+        currentData.timestamp = Date.now();
+      }
+      // Update fetch time
+      lastFetchTime = Date.now();
+      updateUI();
     }
 
-    // Update UI with the latest data
+    // Update the UI components based on currentData
     function updateUI() {
       if (!currentData) return;
       
-      const now = Date.now();
-      const timeSinceLastFetch = now - lastFetchTime;
-      if (timeSinceLastFetch > 300000) {
-        connectionStatus = 'delayed';
-        updateStatusIndicator();
-      }
-      
+      // Calculate index values
       let indexTotal = 0;
       let previousIndexTotal = 0;
       
@@ -579,59 +418,71 @@
         previousIndexTotal += (price - change) * ticker.weight;
         
         const row = document.createElement('tr');
+        
         const nameCell = document.createElement('td');
         nameCell.textContent = ticker.name;
         row.appendChild(nameCell);
-
+        
         const tickerCell = document.createElement('td');
         tickerCell.textContent = ticker.symbol;
         row.appendChild(tickerCell);
-
+        
         const priceCell = document.createElement('td');
         priceCell.textContent = `R$ ${price.toFixed(2)}`;
         row.appendChild(priceCell);
-
+        
         const changeCell = document.createElement('td');
         const changeSign = change >= 0 ? '+' : '';
         changeCell.textContent = `${changeSign}${change.toFixed(2)} (${changeSign}${changePercent.toFixed(2)}%)`;
         changeCell.className = change >= 0 ? 'positive' : 'negative';
         row.appendChild(changeCell);
-
+        
         const weightCell = document.createElement('td');
         weightCell.textContent = `${(ticker.weight * 100).toFixed(0)}%`;
         row.appendChild(weightCell);
         
         tbody.appendChild(row);
       });
-      
+
+      // Update index value and change
       const indexValue = indexTotal;
       const indexChange = indexTotal - previousIndexTotal;
       const indexChangePercent = (indexChange / previousIndexTotal) * 100;
       
       document.getElementById('index-value').innerText = `R$ ${indexValue.toFixed(2)}`;
       const indexChangeElement = document.getElementById('index-change');
-      const changeSign = indexChange >= 0 ? '+' : '';
-      indexChangeElement.textContent = `${changeSign}${indexChange.toFixed(2)} (${changeSign}${indexChangePercent.toFixed(2)}%)`;
+      const sign = indexChange >= 0 ? '+' : '';
+      indexChangeElement.textContent = `${sign}${indexChange.toFixed(2)} (${sign}${indexChangePercent.toFixed(2)}%)`;
       indexChangeElement.className = indexChange >= 0 ? 'positive' : 'negative';
       
+      // Update last updated time and status
       const currentTime = new Date();
       document.getElementById('last-updated-time').textContent = currentTime.toLocaleTimeString();
+      updateStatusIndicator("Online (simulated)");
       
+      // Save historical data for charting
       historicalData.push({
         time: currentTime,
         value: indexValue
       });
       
-      const maxDataPoints = 17280;
-      if (historicalData.length > maxDataPoints) {
-        historicalData = historicalData.slice(-maxDataPoints);
+      // Limit data points, e.g., last 720 points (1h at 5s interval)
+      if (historicalData.length > 720) {
+        historicalData = historicalData.slice(-720);
       }
       
       updateChartDisplay();
-      lastIndexValue = indexValue;
     }
 
-    // Update chart display based on selected time frame
+    // Update status indicator
+    function updateStatusIndicator(statusText) {
+      const statusDot = document.getElementById('status-dot');
+      const connectionStatus = document.getElementById('connection-status');
+      statusDot.className = 'status-indicator status-online';
+      connectionStatus.textContent = statusText;
+    }
+
+    // Update chart display based on selected timeframe
     function updateChartDisplay() {
       const timeFrames = {
         '5m': 60,
@@ -639,7 +490,6 @@
         '30m': 360,
         '1h': 720
       };
-      
       const dataPoints = Math.min(timeFrames[currentTimeFrame], historicalData.length);
       const relevantData = historicalData.slice(-dataPoints);
       
@@ -654,37 +504,40 @@
       chart.update();
     }
 
-    // Format time labels based on selected time frame
+    // Format time label based on timeframe
     function formatTimeLabel(time, timeFrame) {
       if (timeFrame === '5m' || timeFrame === '15m') {
         return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-      } else {
-        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       }
+      return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     }
 
-    // Update the status indicator
-    function updateStatusIndicator() {
-      const statusDot = document.getElementById('status-dot');
-      const statusText = document.getElementById('connection-status');
-      statusDot.className = 'status-indicator';
-      
-      switch (connectionStatus) {
-        case 'online':
-          statusDot.classList.add('status-online');
-          statusText.textContent = 'Online';
-          break;
-        case 'delayed':
-          statusDot.classList.add('status-delayed');
-          statusText.textContent = 'Delayed';
-          break;
-        case 'offline':
-          statusDot.classList.add('status-offline');
-          statusText.textContent = 'Offline';
-          break;
-        default:
-          statusText.textContent = 'Connecting...';
-      }
+    // Set up the chart using Chart.js
+    function setupChart() {
+      const ctx = document.getElementById('chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              callbacks: {
+                label: context => `BRX10: R$ ${context.raw.toFixed(2)}`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+            y: { beginAtZero: false, ticks: { callback: value => 'R$ ' + value.toFixed(2) } }
+          },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+      });
     }
 
     // Export table data to CSV
@@ -713,6 +566,37 @@
       link.click();
       document.body.removeChild(link);
     }
+
+    // Set up event listeners and initialize simulation
+    document.addEventListener('DOMContentLoaded', function() {
+      setupChart();
+      
+      document.getElementById('refresh-button').addEventListener('click', simulateRealtimeData);
+      document.getElementById('export-csv').addEventListener('click', exportToCSV);
+      
+      document.querySelectorAll('.time-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+          this.classList.add('active');
+          currentTimeFrame = this.dataset.time;
+          updateChartDisplay();
+        });
+      });
+      
+      document.getElementById('update-interval').addEventListener('change', function() {
+        updateInterval = parseInt(this.value);
+        if (updateTimer) clearInterval(updateTimer);
+        updateTimer = setInterval(simulateRealtimeData, updateInterval);
+      });
+      
+      updateTimer = setInterval(simulateRealtimeData, updateInterval);
+      
+      // Push a dummy initial data point for the chart
+      historicalData.push({
+        time: new Date(),
+        value: 30.0
+      });
+    });
   </script>
 </body>
 </html>

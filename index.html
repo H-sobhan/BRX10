@@ -323,7 +323,6 @@
     ];
 
     // Proxy URL - REPLACE THIS WITH YOUR ACTUAL PROXY URL 
-    // This needs to be a server you control that can forward requests to Yahoo Finance
     const PROXY_URL = 'https://your-proxy-server.com/api/yahoo-finance';
     
     // State variables
@@ -332,7 +331,7 @@
     let lastIndexValue = 0;
     let currentTimeFrame = '5m';
     let updateInterval = 5000; // Default to 5 seconds
-    let dataUpdateInterval = 30000; // Fetch new data every 30 seconds
+    let dataUpdateInterval = 30000; // Poll every 30 seconds as a fallback
     let lastFetchTime = 0;
     let lastData = null;
     let currentData = null;
@@ -356,29 +355,39 @@
       }]
     };
 
-    // Initialize the application
     document.addEventListener('DOMContentLoaded', function() {
       setupChart();
       setupEventListeners();
       
-      // Initial data fetch
-      fetchRealData().then(() => {
-        updateUI();
-        startAutomaticUpdates();
+      // Attempt to connect via WebSocket for realtime data
+      setupRealtimeConnection();
+
+      // If realtime data isn't provided quickly, fall back to polling after 5 seconds.
+      setTimeout(() => {
+        if (!currentData) {
+          console.log("Falling back to polling mechanism.");
+          fetchRealData().then(() => {
+            updateUI();
+            startAutomaticUpdates();
+          });
+        }
+      }, 5000);
+      
+      // Initially load with dummy data if needed
+      historicalData.push({
+        time: new Date(),
+        value: 30.0
       });
     });
 
     // Set up event listeners
     function setupEventListeners() {
-      // Refresh button
       document.getElementById('refresh-button').addEventListener('click', () => {
         fetchRealData().then(updateUI);
       });
       
-      // Export to CSV
       document.getElementById('export-csv').addEventListener('click', exportToCSV);
       
-      // Time frame buttons
       document.querySelectorAll('.time-btn').forEach(btn => {
         btn.addEventListener('click', function() {
           document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
@@ -388,7 +397,6 @@
         });
       });
       
-      // Update interval selector
       document.getElementById('update-interval').addEventListener('change', function() {
         updateInterval = parseInt(this.value);
         startAutomaticUpdates(); // Restart timers with new interval
@@ -446,70 +454,79 @@
       });
     }
 
-    // Start automatic updates with current interval
+    // Setup realtime connection via WebSocket
+    function setupRealtimeConnection() {
+      const realtimeSocket = new WebSocket('wss://your-realtime-data-server.com/path');
+
+      realtimeSocket.onopen = function() {
+        console.log("WebSocket connected.");
+        // Update status to online upon connection
+        connectionStatus = 'online';
+        updateStatusIndicator();
+      };
+
+      realtimeSocket.onmessage = function(event) {
+        try {
+          const realtimeData = JSON.parse(event.data);
+          // Expect realtimeData to have a structure similar to the output of processApiResponse
+          currentData = realtimeData;
+          lastFetchTime = Date.now();
+          updateUI();
+        } catch (e) {
+          console.error("Error parsing realtime data", e);
+        }
+      };
+
+      realtimeSocket.onerror = function(error) {
+        console.error("WebSocket error", error);
+        // Fallback to polling if an error occurs
+        startAutomaticUpdates();
+      };
+
+      realtimeSocket.onclose = function() {
+        console.log("WebSocket connection closed. Falling back to polling.");
+        startAutomaticUpdates();
+      };
+    }
+
+    // Start automatic updates with current interval (used as a fallback for when real-time isn't available)
     function startAutomaticUpdates() {
-      // Clear existing timers
       if (updateTimer) clearInterval(updateTimer);
       if (fetchTimer) clearInterval(fetchTimer);
-      
-      // Set new timers
       fetchTimer = setInterval(fetchRealData, dataUpdateInterval);
       updateTimer = setInterval(updateUI, updateInterval);
     }
 
-    // Fetch real data from Yahoo Finance via proxy
+    // Fetch real data from Yahoo Finance via proxy (fallback method)
     async function fetchRealData() {
       try {
-        // Add loading indicators
         document.querySelector('.chart-container').classList.add('loading');
         document.querySelector('.index-details').classList.add('loading');
-        
-        // Hide error message if shown
         document.getElementById('error-display').style.display = 'none';
-        
-        // Store current data as last data before fetching new data
         lastData = currentData;
-        
-        // Use either the proxy solution or fallback to direct API call (which will likely fail due to CORS)
         const symbols = tickers.map(t => t.symbol).join(',');
-        
-        // OPTION 1: Use your own proxy (recommended)
         const url = `${PROXY_URL}?symbols=${symbols}`;
-        
-        // OPTION 2: Try direct API call (will likely fail due to CORS in production)
-        // const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-        
         const response = await fetch(url);
         if (!response.ok) throw new Error('Network response was not ok');
         const data = await response.json();
-        
-        // Update status to online
         connectionStatus = 'online';
         updateStatusIndicator();
-        
-        // Store the fetched data
         currentData = processApiResponse(data);
         lastFetchTime = Date.now();
-        
         return currentData;
       } catch (err) {
         console.error('Failed to fetch data', err);
         document.getElementById('error-display').style.display = 'block';
-        
-        // Update status to offline
         connectionStatus = 'offline';
         updateStatusIndicator();
-        
-        // Return null or last valid data
         return null;
       } finally {
-        // Remove loading indicators
         document.querySelector('.chart-container').classList.remove('loading');
         document.querySelector('.index-details').classList.remove('loading');
       }
     }
 
-    // Process API response
+    // Process API response to a common format
     function processApiResponse(data) {
       if (!data || !data.quoteResponse || !data.quoteResponse.result) {
         return null;
@@ -533,24 +550,20 @@
       return processed;
     }
 
-    // Update UI with latest data or interpolated data
+    // Update UI with the latest data
     function updateUI() {
       if (!currentData) return;
       
       const now = Date.now();
       const timeSinceLastFetch = now - lastFetchTime;
-      
-      // If it's been more than 5 minutes since last successful fetch, show delayed status
       if (timeSinceLastFetch > 300000) {
         connectionStatus = 'delayed';
         updateStatusIndicator();
       }
       
-      // Calculate current index value
       let indexTotal = 0;
       let previousIndexTotal = 0;
       
-      // Update the stock table
       const tbody = document.getElementById('stock-table');
       tbody.innerHTML = '';
       
@@ -562,36 +575,28 @@
         const change = stockInfo.change;
         const changePercent = stockInfo.changePercent;
         
-        // Calculate weighted value for index
         indexTotal += price * ticker.weight;
         previousIndexTotal += (price - change) * ticker.weight;
         
-        // Create table row
         const row = document.createElement('tr');
-        
-        // Company name
         const nameCell = document.createElement('td');
         nameCell.textContent = ticker.name;
         row.appendChild(nameCell);
-        
-        // Ticker
+
         const tickerCell = document.createElement('td');
         tickerCell.textContent = ticker.symbol;
         row.appendChild(tickerCell);
-        
-        // Price
+
         const priceCell = document.createElement('td');
         priceCell.textContent = `R$ ${price.toFixed(2)}`;
         row.appendChild(priceCell);
-        
-        // Change
+
         const changeCell = document.createElement('td');
         const changeSign = change >= 0 ? '+' : '';
         changeCell.textContent = `${changeSign}${change.toFixed(2)} (${changeSign}${changePercent.toFixed(2)}%)`;
         changeCell.className = change >= 0 ? 'positive' : 'negative';
         row.appendChild(changeCell);
-        
-        // Weight
+
         const weightCell = document.createElement('td');
         weightCell.textContent = `${(ticker.weight * 100).toFixed(0)}%`;
         row.appendChild(weightCell);
@@ -599,64 +604,53 @@
         tbody.appendChild(row);
       });
       
-      // Update the index value
       const indexValue = indexTotal;
       const indexChange = indexTotal - previousIndexTotal;
       const indexChangePercent = (indexChange / previousIndexTotal) * 100;
       
       document.getElementById('index-value').innerText = `R$ ${indexValue.toFixed(2)}`;
-      
       const indexChangeElement = document.getElementById('index-change');
       const changeSign = indexChange >= 0 ? '+' : '';
       indexChangeElement.textContent = `${changeSign}${indexChange.toFixed(2)} (${changeSign}${indexChangePercent.toFixed(2)}%)`;
       indexChangeElement.className = indexChange >= 0 ? 'positive' : 'negative';
       
-      // Update last updated time
       const currentTime = new Date();
       document.getElementById('last-updated-time').textContent = currentTime.toLocaleTimeString();
       
-      // Save historical data
       historicalData.push({
         time: currentTime,
         value: indexValue
       });
       
-      // Limit historical data based on timeframe (maximum 24 hours = 17280 points at 5s interval)
       const maxDataPoints = 17280;
       if (historicalData.length > maxDataPoints) {
         historicalData = historicalData.slice(-maxDataPoints);
       }
       
-      // Update the chart
       updateChartDisplay();
-      
-      // Store last index value for next comparison
       lastIndexValue = indexValue;
     }
 
     // Update chart display based on selected time frame
     function updateChartDisplay() {
       const timeFrames = {
-        '5m': 60,     // 5 minutes (at 5s intervals = 60 points)
-        '15m': 180,   // 15 minutes (180 points)
-        '30m': 360,   // 30 minutes (360 points)
-        '1h': 720     // 1 hour (720 points)
+        '5m': 60,
+        '15m': 180,
+        '30m': 360,
+        '1h': 720
       };
       
       const dataPoints = Math.min(timeFrames[currentTimeFrame], historicalData.length);
       const relevantData = historicalData.slice(-dataPoints);
       
-      // Clear existing chart data
       chartData.labels = [];
       chartData.datasets[0].data = [];
       
-      // Add new data points
       relevantData.forEach(point => {
         chartData.labels.push(formatTimeLabel(point.time, currentTimeFrame));
         chartData.datasets[0].data.push(point.value);
       });
       
-      // Update chart
       chart.update();
     }
 
@@ -673,7 +667,6 @@
     function updateStatusIndicator() {
       const statusDot = document.getElementById('status-dot');
       const statusText = document.getElementById('connection-status');
-      
       statusDot.className = 'status-indicator';
       
       switch (connectionStatus) {
@@ -697,8 +690,6 @@
     // Export table data to CSV
     function exportToCSV() {
       let csv = 'Company,Ticker,Price (R$),Change,Weight\n';
-      
-      // Get all table rows
       const rows = document.querySelectorAll('#stock-table tr');
       rows.forEach(row => {
         const company = row.cells[0].textContent;
@@ -706,17 +697,12 @@
         const price = row.cells[2].textContent.replace('R$ ', '');
         const change = row.cells[3].textContent;
         const weight = row.cells[4].textContent;
-        
         csv += `"${company}","${symbol}","${price}","${change}","${weight}"\n`;
       });
-      
-      // Add index value
       const indexValue = document.getElementById('index-value').textContent;
       const indexChange = document.getElementById('index-change').textContent;
       csv += `\n"BRX10 Index","","${indexValue}","${indexChange}","100%"\n`;
       csv += `"Last Updated","${document.getElementById('last-updated-time').textContent}","","",""\n`;
-      
-      // Create download link
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -727,12 +713,6 @@
       link.click();
       document.body.removeChild(link);
     }
-
-    // Initialize with a dummy data point to avoid empty chart
-    historicalData.push({
-      time: new Date(),
-      value: 30.0
-    });
   </script>
 </body>
 </html>

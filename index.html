@@ -1,25 +1,135 @@
-
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BRX10 Index</title>
-  <meta charset="UTF-8">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background: #f8f9fa; color: #212529; padding: 20px; }
-    h1 { color: #007bff; }
-    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-    th, td { border: 1px solid #dee2e6; padding: 8px; text-align: left; }
-    th { background-color: #007bff; color: white; }
-    .index-value { font-size: 24px; margin-top: 20px; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f9f9f9;
+    }
+    h1 {
+      color: #333;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    #index-value {
+      font-size: 24px;
+      margin: 10px 0;
+    }
   </style>
 </head>
 <body>
-  <h1>BRX10 Export Index</h1>
-  <div class="index-value">📈 Current Index Value: <strong>31.94</strong></div>
-  <p>Last Updated: 2025-04-09 14:06:32 (São Paulo Time)</p>
+  <h1>BRX10 Real-Time Export Index</h1>
+  <div id="index-value">Loading...</div>
+  <canvas id="chart" width="400" height="150"></canvas>
+
   <table>
-    <tr><th>Company</th><th>Price (R$)</th></tr>
-    <tr><td>Vale</td><td>49.96</td></tr><tr><td>Petrobras</td><td>31.4</td></tr><tr><td>JBS</td><td>41.16</td></tr><tr><td>BRF</td><td>20.4</td></tr><tr><td>Suzano</td><td>51.9</td></tr><tr><td>Embraer</td><td>59.08</td></tr><tr><td>Ambev</td><td>13.59</td></tr><tr><td>Gerdau</td><td>14.15</td></tr><tr><td>Klabin</td><td>18.29</td></tr><tr><td>Marfrig</td><td>19.44</td></tr>
+    <thead>
+      <tr>
+        <th>Company</th>
+        <th>Ticker</th>
+        <th>Price (R$)</th>
+      </tr>
+    </thead>
+    <tbody id="stock-table"></tbody>
   </table>
-  <p>Powered by Yahoo Finance • Real-time data by Google Colab</p>
+
+  <script>
+    const tickers = [
+      { name: 'Vale', symbol: 'VALE3.SA' },
+      { name: 'Petrobras', symbol: 'PETR4.SA' },
+      { name: 'JBS', symbol: 'JBSS3.SA' },
+      { name: 'BRF', symbol: 'BRFS3.SA' },
+      { name: 'Suzano', symbol: 'SUZB3.SA' },
+      { name: 'Embraer', symbol: 'EMBR3.SA' },
+      { name: 'Ambev', symbol: 'ABEV3.SA' },
+      { name: 'Gerdau', symbol: 'GGBR4.SA' },
+      { name: 'Klabin', symbol: 'KLBN11.SA' },
+      { name: 'Marfrig', symbol: 'MRFG3.SA' },
+    ];
+
+    let chart;
+    const chartData = {
+      labels: [],
+      datasets: [{
+        label: 'BRX10 Index',
+        borderColor: 'blue',
+        fill: false,
+        data: [],
+      }]
+    };
+
+    async function fetchPrices() {
+      const symbols = tickers.map(t => t.symbol).join(',');
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const prices = data.quoteResponse.result.reduce((acc, item) => {
+          acc[item.symbol] = item.regularMarketPrice;
+          return acc;
+        }, {});
+
+        const tbody = document.getElementById('stock-table');
+        tbody.innerHTML = '';
+        let total = 0;
+
+        tickers.forEach(ticker => {
+          const price = prices[ticker.symbol];
+          total += price;
+          const row = `<tr><td>${ticker.name}</td><td>${ticker.symbol}</td><td>${price.toFixed(2)}</td></tr>`;
+          tbody.innerHTML += row;
+        });
+
+        const indexValue = (total / tickers.length).toFixed(2);
+        document.getElementById('index-value').innerText = `Current BRX10 Index: ${indexValue}`;
+
+        const now = new Date().toLocaleTimeString();
+        chartData.labels.push(now);
+        chartData.datasets[0].data.push(indexValue);
+
+        if (chartData.labels.length > 20) {
+          chartData.labels.shift();
+          chartData.datasets[0].data.shift();
+        }
+
+        chart.update();
+      } catch (err) {
+        console.error('Failed to fetch data', err);
+      }
+    }
+
+    function setupChart() {
+      const ctx = document.getElementById('chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: false }
+          }
+        }
+      });
+    }
+
+    setupChart();
+    fetchPrices();
+    setInterval(fetchPrices, 60000); // update every minute
+  </script>
 </body>
 </html>

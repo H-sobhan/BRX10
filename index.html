@@ -3,16 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BRX10 Index</title>
+  <title>BRX10 Real-Time Index</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
   <style>
     :root {
       --primary-color: #1a73e8;
       --secondary-color: #34a853;
       --warning-color: #fbbc05;
       --error-color: #ea4335;
-      --background-color: #f9f9f9;
+      --background-color: #f8f9fa;
       --card-color: #ffffff;
       --text-color: #333333;
       --border-color: #e0e0e0;
@@ -193,6 +192,37 @@
       display: none;
     }
 
+    .config-panel {
+      margin-top: 10px;
+    }
+
+    .config-panel select {
+      padding: 5px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+      background-color: white;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+
+    .status-online {
+      background-color: var(--secondary-color);
+    }
+
+    .status-delayed {
+      background-color: var(--warning-color);
+    }
+
+    .status-offline {
+      background-color: var(--error-color);
+    }
+
     @media (max-width: 768px) {
       .chart-container {
         min-width: 100%;
@@ -233,13 +263,27 @@
           <h2>Current Value</h2>
           <div id="index-value">Loading...</div>
           <div id="index-change">--</div>
-          <div class="last-updated">Last updated: <span id="last-updated-time">--</span></div>
+          <div class="last-updated">
+            <span class="status-indicator" id="status-dot"></span>
+            <span id="connection-status">Connecting...</span> | 
+            Last updated: <span id="last-updated-time">--</span>
+          </div>
+          <div class="config-panel">
+            <label for="update-interval">Update interval:</label>
+            <select id="update-interval">
+              <option value="5000">5 seconds</option>
+              <option value="15000">15 seconds</option>
+              <option value="30000">30 seconds</option>
+              <option value="60000">60 seconds</option>
+            </select>
+          </div>
         </div>
         <div class="chart-container">
           <div class="time-selector">
-            <button class="time-btn active" data-time="1h">1H</button>
-            <button class="time-btn" data-time="3h">3H</button>
-            <button class="time-btn" data-time="1d">1D</button>
+            <button class="time-btn active" data-time="5m">5M</button>
+            <button class="time-btn" data-time="15m">15M</button>
+            <button class="time-btn" data-time="30m">30M</button>
+            <button class="time-btn" data-time="1h">1H</button>
           </div>
           <canvas id="chart"></canvas>
         </div>
@@ -278,14 +322,23 @@
       { name: 'Marfrig', symbol: 'MRFG3.SA', weight: 0.05 },
     ];
 
-    // Demo mode - replace with actual API call in production
-    const DEMO_MODE = true; // Set to false when you have API proxy ready
+    // Proxy URL - REPLACE THIS WITH YOUR ACTUAL PROXY URL 
+    // This needs to be a server you control that can forward requests to Yahoo Finance
+    const PROXY_URL = 'https://your-proxy-server.com/api/yahoo-finance';
     
     // State variables
     let chart;
     let historicalData = [];
     let lastIndexValue = 0;
-    let currentTimeFrame = '1h';
+    let currentTimeFrame = '5m';
+    let updateInterval = 5000; // Default to 5 seconds
+    let dataUpdateInterval = 30000; // Fetch new data every 30 seconds
+    let lastFetchTime = 0;
+    let lastData = null;
+    let currentData = null;
+    let updateTimer = null;
+    let fetchTimer = null;
+    let connectionStatus = 'connecting'; // 'online', 'delayed', 'offline'
     
     // Chart configuration
     const chartData = {
@@ -307,16 +360,20 @@
     document.addEventListener('DOMContentLoaded', function() {
       setupChart();
       setupEventListeners();
-      fetchData();
       
-      // Set interval for auto-refresh (every minute)
-      setInterval(fetchData, 60000);
+      // Initial data fetch
+      fetchRealData().then(() => {
+        updateUI();
+        startAutomaticUpdates();
+      });
     });
 
     // Set up event listeners
     function setupEventListeners() {
       // Refresh button
-      document.getElementById('refresh-button').addEventListener('click', fetchData);
+      document.getElementById('refresh-button').addEventListener('click', () => {
+        fetchRealData().then(updateUI);
+      });
       
       // Export to CSV
       document.getElementById('export-csv').addEventListener('click', exportToCSV);
@@ -327,8 +384,14 @@
           document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
           this.classList.add('active');
           currentTimeFrame = this.dataset.time;
-          updateChartTimeFrame();
+          updateChartDisplay();
         });
+      });
+      
+      // Update interval selector
+      document.getElementById('update-interval').addEventListener('change', function() {
+        updateInterval = parseInt(this.value);
+        startAutomaticUpdates(); // Restart timers with new interval
       });
     }
 
@@ -383,40 +446,62 @@
       });
     }
 
-    // Fetch data (API or demo)
-    async function fetchData() {
+    // Start automatic updates with current interval
+    function startAutomaticUpdates() {
+      // Clear existing timers
+      if (updateTimer) clearInterval(updateTimer);
+      if (fetchTimer) clearInterval(fetchTimer);
+      
+      // Set new timers
+      fetchTimer = setInterval(fetchRealData, dataUpdateInterval);
+      updateTimer = setInterval(updateUI, updateInterval);
+    }
+
+    // Fetch real data from Yahoo Finance via proxy
+    async function fetchRealData() {
       try {
         // Add loading indicators
         document.querySelector('.chart-container').classList.add('loading');
         document.querySelector('.index-details').classList.add('loading');
-        document.getElementById('stock-table').innerHTML = '';
         
         // Hide error message if shown
         document.getElementById('error-display').style.display = 'none';
         
-        let data;
+        // Store current data as last data before fetching new data
+        lastData = currentData;
         
-        if (DEMO_MODE) {
-          // Use demo data in development to avoid CORS issues
-          data = generateDemoData();
-          await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
-        } else {
-          // In production, use a proxy or backend service to avoid CORS
-          const symbols = tickers.map(t => t.symbol).join(',');
-          // Example with proxy - replace with your actual proxy endpoint
-          const url = `/api/stock-proxy?symbols=${symbols}`;
-          // Alternative: const url = `https://your-backend-service.com/api/yahoo-finance?symbols=${symbols}`;
-          
-          const response = await fetch(url);
-          if (!response.ok) throw new Error('Network response was not ok');
-          data = await response.json();
-        }
+        // Use either the proxy solution or fallback to direct API call (which will likely fail due to CORS)
+        const symbols = tickers.map(t => t.symbol).join(',');
         
-        processData(data);
+        // OPTION 1: Use your own proxy (recommended)
+        const url = `${PROXY_URL}?symbols=${symbols}`;
         
+        // OPTION 2: Try direct API call (will likely fail due to CORS in production)
+        // const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        
+        // Update status to online
+        connectionStatus = 'online';
+        updateStatusIndicator();
+        
+        // Store the fetched data
+        currentData = processApiResponse(data);
+        lastFetchTime = Date.now();
+        
+        return currentData;
       } catch (err) {
         console.error('Failed to fetch data', err);
         document.getElementById('error-display').style.display = 'block';
+        
+        // Update status to offline
+        connectionStatus = 'offline';
+        updateStatusIndicator();
+        
+        // Return null or last valid data
+        return null;
       } finally {
         // Remove loading indicators
         document.querySelector('.chart-container').classList.remove('loading');
@@ -424,64 +509,53 @@
       }
     }
 
-    // Generate demo data for development
-    function generateDemoData() {
-      const now = new Date();
-      const baseValues = {
-        'VALE3.SA': 65.42 + (Math.random() * 2 - 1),
-        'PETR4.SA': 38.75 + (Math.random() * 1.5 - 0.75),
-        'JBSS3.SA': 27.13 + (Math.random() * 1 - 0.5),
-        'BRFS3.SA': 8.94 + (Math.random() * 0.4 - 0.2),
-        'SUZB3.SA': 52.30 + (Math.random() * 1.2 - 0.6),
-        'EMBR3.SA': 23.17 + (Math.random() * 0.8 - 0.4),
-        'ABEV3.SA': 14.83 + (Math.random() * 0.5 - 0.25),
-        'GGBR4.SA': 21.56 + (Math.random() * 0.7 - 0.35),
-        'KLBN11.SA': 19.25 + (Math.random() * 0.6 - 0.3),
-        'MRFG3.SA': 12.47 + (Math.random() * 0.5 - 0.25)
+    // Process API response
+    function processApiResponse(data) {
+      if (!data || !data.quoteResponse || !data.quoteResponse.result) {
+        return null;
+      }
+      
+      const stocks = data.quoteResponse.result;
+      const processed = {
+        timestamp: Date.now(),
+        stocks: {}
       };
       
-      // Generate previous day close prices (slightly different)
-      const previousClose = {};
-      Object.keys(baseValues).forEach(symbol => {
-        previousClose[symbol] = baseValues[symbol] * (1 + (Math.random() * 0.04 - 0.02));
+      stocks.forEach(stock => {
+        processed.stocks[stock.symbol] = {
+          price: stock.regularMarketPrice,
+          previousClose: stock.regularMarketPreviousClose,
+          change: stock.regularMarketChange,
+          changePercent: stock.regularMarketChangePercent
+        };
       });
       
-      // Mock API response format
-      return {
-        quoteResponse: {
-          result: tickers.map(ticker => ({
-            symbol: ticker.symbol,
-            regularMarketPrice: baseValues[ticker.symbol],
-            regularMarketPreviousClose: previousClose[ticker.symbol],
-            regularMarketChange: baseValues[ticker.symbol] - previousClose[ticker.symbol],
-            regularMarketChangePercent: ((baseValues[ticker.symbol] / previousClose[ticker.symbol] - 1) * 100),
-            regularMarketTime: Math.floor(now.getTime() / 1000)
-          }))
-        }
-      };
+      return processed;
     }
 
-    // Process the data received
-    function processData(data) {
-      const stockData = data.quoteResponse.result;
-      const prices = stockData.reduce((acc, item) => {
-        acc[item.symbol] = {
-          price: item.regularMarketPrice,
-          change: item.regularMarketChange,
-          changePercent: item.regularMarketChangePercent
-        };
-        return acc;
-      }, {});
+    // Update UI with latest data or interpolated data
+    function updateUI() {
+      if (!currentData) return;
+      
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchTime;
+      
+      // If it's been more than 5 minutes since last successful fetch, show delayed status
+      if (timeSinceLastFetch > 300000) {
+        connectionStatus = 'delayed';
+        updateStatusIndicator();
+      }
+      
+      // Calculate current index value
+      let indexTotal = 0;
+      let previousIndexTotal = 0;
       
       // Update the stock table
       const tbody = document.getElementById('stock-table');
       tbody.innerHTML = '';
       
-      let indexTotal = 0;
-      let previousIndexTotal = 0;
-      
       tickers.forEach(ticker => {
-        const stockInfo = prices[ticker.symbol];
+        const stockInfo = currentData.stocks[ticker.symbol];
         if (!stockInfo) return;
         
         const price = stockInfo.price;
@@ -538,33 +612,35 @@
       indexChangeElement.className = indexChange >= 0 ? 'positive' : 'negative';
       
       // Update last updated time
-      const now = new Date();
-      document.getElementById('last-updated-time').textContent = now.toLocaleTimeString();
+      const currentTime = new Date();
+      document.getElementById('last-updated-time').textContent = currentTime.toLocaleTimeString();
       
       // Save historical data
       historicalData.push({
-        time: now,
+        time: currentTime,
         value: indexValue
       });
       
-      // Limit historical data to the last 24 hours (assuming 1-minute intervals = 1440 points)
-      if (historicalData.length > 1440) {
-        historicalData.shift();
+      // Limit historical data based on timeframe (maximum 24 hours = 17280 points at 5s interval)
+      const maxDataPoints = 17280;
+      if (historicalData.length > maxDataPoints) {
+        historicalData = historicalData.slice(-maxDataPoints);
       }
       
-      // Update the chart with new data
-      updateChartTimeFrame();
+      // Update the chart
+      updateChartDisplay();
       
       // Store last index value for next comparison
       lastIndexValue = indexValue;
     }
 
-    // Update chart based on selected time frame
-    function updateChartTimeFrame() {
+    // Update chart display based on selected time frame
+    function updateChartDisplay() {
       const timeFrames = {
-        '1h': 60,    // 60 minutes
-        '3h': 180,   // 3 hours
-        '1d': 1440   // 24 hours
+        '5m': 60,     // 5 minutes (at 5s intervals = 60 points)
+        '15m': 180,   // 15 minutes (180 points)
+        '30m': 360,   // 30 minutes (360 points)
+        '1h': 720     // 1 hour (720 points)
       };
       
       const dataPoints = Math.min(timeFrames[currentTimeFrame], historicalData.length);
@@ -586,16 +662,35 @@
 
     // Format time labels based on selected time frame
     function formatTimeLabel(time, timeFrame) {
-      if (timeFrame === '1h') {
-        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      } else if (timeFrame === '3h') {
-        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      if (timeFrame === '5m' || timeFrame === '15m') {
+        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
       } else {
-        return time.toLocaleString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        });
+        return time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      }
+    }
+
+    // Update the status indicator
+    function updateStatusIndicator() {
+      const statusDot = document.getElementById('status-dot');
+      const statusText = document.getElementById('connection-status');
+      
+      statusDot.className = 'status-indicator';
+      
+      switch (connectionStatus) {
+        case 'online':
+          statusDot.classList.add('status-online');
+          statusText.textContent = 'Online';
+          break;
+        case 'delayed':
+          statusDot.classList.add('status-delayed');
+          statusText.textContent = 'Delayed';
+          break;
+        case 'offline':
+          statusDot.classList.add('status-offline');
+          statusText.textContent = 'Offline';
+          break;
+        default:
+          statusText.textContent = 'Connecting...';
       }
     }
 
@@ -603,17 +698,16 @@
     function exportToCSV() {
       let csv = 'Company,Ticker,Price (R$),Change,Weight\n';
       
-      tickers.forEach(ticker => {
-        const row = document.querySelector(`#stock-table tr:has(td:nth-child(2):contains('${ticker.symbol}'))`);
-        if (row) {
-          const company = row.cells[0].textContent;
-          const symbol = row.cells[1].textContent;
-          const price = row.cells[2].textContent.replace('R$ ', '');
-          const change = row.cells[3].textContent;
-          const weight = row.cells[4].textContent;
-          
-          csv += `"${company}","${symbol}","${price}","${change}","${weight}"\n`;
-        }
+      // Get all table rows
+      const rows = document.querySelectorAll('#stock-table tr');
+      rows.forEach(row => {
+        const company = row.cells[0].textContent;
+        const symbol = row.cells[1].textContent;
+        const price = row.cells[2].textContent.replace('R$ ', '');
+        const change = row.cells[3].textContent;
+        const weight = row.cells[4].textContent;
+        
+        csv += `"${company}","${symbol}","${price}","${change}","${weight}"\n`;
       });
       
       // Add index value
@@ -634,14 +728,11 @@
       document.body.removeChild(link);
     }
 
-    // Initialize with one data point to avoid empty chart
-    const initialTime = new Date();
+    // Initialize with a dummy data point to avoid empty chart
     historicalData.push({
-      time: initialTime,
-      value: 30.0  // Initial dummy value
+      time: new Date(),
+      value: 30.0
     });
-    chartData.labels.push(formatTimeLabel(initialTime, '1h'));
-    chartData.datasets[0].data.push(30.0);
   </script>
 </body>
 </html>
